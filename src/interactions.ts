@@ -69,9 +69,11 @@ export class FarcasterInteractionManager {
 
         const agent = await this.client.getProfile(agentFid);
         for (const mention of mentions) {
-            const messageHash = toHex(mention.hash);
-            const conversationId = `${messageHash}-${this.runtime.agentId}`;
-            const roomId = stringToUuid(conversationId);
+            const roomId = castUuid({
+                hash: mention.hash,
+                agentId: this.runtime.agentId
+            });
+
             const userId = stringToUuid(mention.authorFid.toString());
 
             const pastMemoryId = castUuid({
