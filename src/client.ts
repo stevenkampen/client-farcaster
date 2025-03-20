@@ -47,6 +47,32 @@ export class FarcasterClient {
         };
     }
 
+    async publishLike(
+        castHash: string,
+        // eslint-disable-next-line
+        retryTimes?: number
+    ): Promise<boolean | undefined> {
+        try {
+            const result = await this.neynar.publishReaction({
+                signerUuid: this.signerUuid,
+                reactionType: 'like',
+                target: castHash
+            });
+            if (result.success) {
+                return true;
+            }
+            return false;
+        } catch (err) {
+            if (isApiErrorResponse(err)) {
+                elizaLogger.error("Neynar error: ", err.response.data);
+                throw err.response.data;
+            } else {
+                elizaLogger.error("Error: ", err);
+                throw err;
+            }
+        }
+    }
+
     async publishCast(
         cast: string,
         parentCastId: CastId | undefined,

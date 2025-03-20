@@ -35,6 +35,27 @@ var FarcasterClient = class {
       timestamp: new Date(neynarResponse.timestamp)
     };
   }
+  async publishLike(castHash, retryTimes) {
+    try {
+      const result = await this.neynar.publishReaction({
+        signerUuid: this.signerUuid,
+        reactionType: "like",
+        target: castHash
+      });
+      if (result.success) {
+        return true;
+      }
+      return false;
+    } catch (err) {
+      if (isApiErrorResponse(err)) {
+        elizaLogger.error("Neynar error: ", err.response.data);
+        throw err.response.data;
+      } else {
+        elizaLogger.error("Error: ", err);
+        throw err;
+      }
+    }
+  }
   async publishCast(cast, parentCastId, retryTimes) {
     try {
       const result = await this.neynar.publishCast({
@@ -180,13 +201,12 @@ import {
   composeContext,
   generateText,
   ModelClass,
-  stringToUuid as stringToUuid3,
-  elizaLogger as elizaLogger3
+  elizaLogger as elizaLogger3,
+  getEmbeddingZeroVector as getEmbeddingZeroVector2
 } from "@elizaos/core";
 
 // src/prompts.ts
 import {
-  messageCompletionFooter,
   shouldRespondFooter
 } from "@elizaos/core";
 var formatCast = (cast) => {
@@ -220,6 +240,18 @@ Write a single sentence post that is {{adjective}} about {{topic}} (without ment
 Try to write something totally different than previous posts. Do not add commentary or ackwowledge this request, just write the post.
 
 Your response should not contain any questions. Brief, concise statements only. No emojis. Use \\n\\n (double spaces) between statements.`;
+var customMessageCompletionFooter = `
+Response format should be formatted in a valid JSON block like this:
+  \`\`\`json
+  { "user": "{{agentName}}", "text": "<string>" }
+  \`\`\`
+  OR
+  \`\`\`json
+  { "user": "{{agentName}}", "action": "<string>" }
+  \`\`\`
+  
+  The \u201Caction\u201D field should be one of the options in [Available Actions], and the "text" field should be the response you want to send. Only one of these fields should be present in the response.
+  `;
 var messageHandlerTemplate = headerTemplate + `
 Recent interactions between {{agentName}} and other users:
 {{recentPostInteractions}}
@@ -228,7 +260,7 @@ Thread of casts You Are Replying To:
 {{formattedConversation}}
 
 # Task: Generate a post in the voice, style and perspective of {{agentName}} (@{{farcasterUsername}}):
-{{currentPost}}` + messageCompletionFooter;
+{{currentPost}}` + customMessageCompletionFooter;
 var shouldRespondTemplate = (
   //
   `# Task: Decide if {{agentName}} should respond.
@@ -560,13 +592,31 @@ var FarcasterPostManager = class {
         this.runtime.character,
         timeline
       );
-      const generateRoomId = stringToUuid3("farcaster_generate_room");
+      const generateRoomId = this.runtime.agentId;
+      await this.runtime.ensureRoomExists(generateRoomId);
+      await this.runtime.ensureParticipantInRoom(
+        this.runtime.agentId,
+        generateRoomId
+      );
+      const existingMemories = await this.runtime.messageManager.getMemories({ roomId: generateRoomId, count: 1, start: 0 });
+      let memoryToUse = existingMemories.length ? existingMemories[0] : {
+        agentId: this.runtime.agentId,
+        roomId: generateRoomId,
+        userId: this.runtime.agentId,
+        embedding: getEmbeddingZeroVector2(),
+        content: {
+          text: "ahhhh what a great day to be alive"
+        }
+      };
+      if (!existingMemories.length) {
+        await this.runtime.messageManager.createMemory(memoryToUse);
+      }
       const state = await this.runtime.composeState(
         {
           roomId: generateRoomId,
           userId: this.runtime.agentId,
           agentId: this.runtime.agentId,
-          content: { text: "", action: "" }
+          content: memoryToUse.content
         },
         {
           farcasterUserName: profile.username,
@@ -607,7 +657,7 @@ var FarcasterPostManager = class {
           profile
         });
         await this.runtime.cacheManager.set(
-          `farcaster/${this.fid}/lastCast`,
+          `farcaster/${this.fid}/lastPost`,
           {
             hash: cast.hash,
             timestamp: Date.now()
@@ -649,7 +699,8 @@ import {
   generateShouldRespond,
   ModelClass as ModelClass2,
   stringToUuid as stringToUuid4,
-  elizaLogger as elizaLogger4
+  elizaLogger as elizaLogger4,
+  getEmbeddingZeroVector as getEmbeddingZeroVector3
 } from "@elizaos/core";
 var FarcasterInteractionManager = class {
   constructor(client, runtime, signerUuid, cache) {
@@ -813,8 +864,8 @@ var FarcasterInteractionManager = class {
       modelClass: ModelClass2.LARGE
     });
     responseContent.inReplyTo = memoryId;
-    if (!responseContent.text) return;
-    if ((_g = this.client.farcasterConfig) == null ? void 0 : _g.FARCASTER_DRY_RUN) {
+    if (!responseContent.text && !responseContent.action) return;
+    if (((_g = this.client.farcasterConfig) == null ? void 0 : _g.FARCASTER_DRY_RUN) && responseContent.text) {
       elizaLogger4.info(
         `Dry run: would have responded to cast ${cast.hash} with ${responseContent.text}`
       );
@@ -841,20 +892,41 @@ var FarcasterInteractionManager = class {
         for (const { memory: memory2 } of results) {
           await this.runtime.messageManager.createMemory(memory2);
         }
+        await this.client.publishLike(cast.hash);
         return results.map((result) => result.memory);
       } catch (error) {
         elizaLogger4.error("Error sending response cast:", error);
         return [];
       }
     };
-    const responseMessages = await callback(responseContent);
+    const saveActionMemoryOnly = async () => {
+      const actionOnlyMemory = {
+        agentId: this.runtime.agentId,
+        roomId: memory.roomId,
+        userId: this.runtime.agentId,
+        embedding: getEmbeddingZeroVector3(),
+        content: {
+          url: "",
+          hash: "0x0",
+          text: "(You didn't actually say anything. You just thought decided which action to execute.) ",
+          action: responseContent.action,
+          source: "farcaster",
+          inReplyTo: responseContent.inReplyTo
+        }
+      };
+      await this.runtime.messageManager.createMemory(actionOnlyMemory);
+      return [actionOnlyMemory];
+    };
+    const responseMessages = responseContent.text ? await callback(responseContent) : await saveActionMemoryOnly();
     const newState = await this.runtime.updateRecentMessageState(state);
-    await this.runtime.processActions(
-      { ...memory, content: { ...memory.content, cast } },
-      responseMessages,
-      newState,
-      callback
-    );
+    if (responseContent.action) {
+      await this.runtime.processActions(
+        { ...memory, content: { ...memory.content, cast } },
+        responseMessages,
+        newState,
+        callback
+      );
+    }
   }
 };
 

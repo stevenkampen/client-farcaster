@@ -9,6 +9,7 @@ import {
     type HandlerCallback,
     type Content,
     type IAgentRuntime,
+    getEmbeddingZeroVector,
 } from "@elizaos/core";
 import type { FarcasterClient } from "./client";
 import { toHex } from "viem";
@@ -237,9 +238,9 @@ export class FarcasterInteractionManager {
 
         responseContent.inReplyTo = memoryId;
 
-        if (!responseContent.text) return;
+        if (!responseContent.text && !responseContent.action) return;
 
-        if (this.client.farcasterConfig?.FARCASTER_DRY_RUN) {
+        if (this.client.farcasterConfig?.FARCASTER_DRY_RUN && responseContent.text) {
             elizaLogger.info(
                 `Dry run: would have responded to cast ${cast.hash} with ${responseContent.text}`
             );
@@ -272,6 +273,7 @@ export class FarcasterInteractionManager {
                 for (const { memory } of results) {
                     await this.runtime.messageManager.createMemory(memory);
                 }
+                await this.client.publishLike(cast.hash)
                 return results.map((result) => result.memory);
             } catch (error) {
                 elizaLogger.error("Error sending response cast:", error);
@@ -279,15 +281,35 @@ export class FarcasterInteractionManager {
             }
         };
 
-        const responseMessages = await callback(responseContent);
+        const saveActionMemoryOnly = async () => {
+            const actionOnlyMemory: Memory = {
+                agentId: this.runtime.agentId,
+                roomId: memory.roomId,
+                userId:  this.runtime.agentId,
+                embedding: getEmbeddingZeroVector(),
+                content: {
+                    url: "",
+                    hash: "0x0",
+                    text: "(You didn't actually say anything. You just thought decided which action to execute.) ",
+                    action: responseContent.action,
+                    source: "farcaster",
+                    inReplyTo: responseContent.inReplyTo
+                  }
+            }
+            await this.runtime.messageManager.createMemory(actionOnlyMemory)
+            return [actionOnlyMemory]
+        }
+
+        const responseMessages = responseContent.text ? await callback(responseContent) : await saveActionMemoryOnly();
 
         const newState = await this.runtime.updateRecentMessageState(state);
-
-        await this.runtime.processActions(
-            { ...memory, content: { ...memory.content, cast } },
-            responseMessages,
-            newState,
-            callback
-        );
+        if (responseContent.action) {
+            await this.runtime.processActions(
+                { ...memory, content: { ...memory.content, cast } },
+                responseMessages,
+                newState,
+                callback
+            );
+        }
     }
 }

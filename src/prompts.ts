@@ -44,9 +44,21 @@ Try to write something totally different than previous posts. Do not add comment
 
 Your response should not contain any questions. Brief, concise statements only. No emojis. Use \\n\\n (double spaces) between statements.`;
 
+export const customMessageCompletionFooter = `\nResponse format should be formatted in a valid JSON block like this:
+  \`\`\`json
+  { "user": "{{agentName}}", "text": "<string>" }
+  \`\`\`
+  OR
+  \`\`\`json
+  { "user": "{{agentName}}", "action": "<string>" }
+  \`\`\`
+  
+  The “action” field should be one of the options in [Available Actions], and the "text" field should be the response you want to send. Only one of these fields should be present in the response.
+  `;
+
 export const messageHandlerTemplate =
-    headerTemplate +
-    `
+  headerTemplate +
+  `
 Recent interactions between {{agentName}} and other users:
 {{recentPostInteractions}}
 
@@ -55,7 +67,8 @@ Thread of casts You Are Replying To:
 
 # Task: Generate a post in the voice, style and perspective of {{agentName}} (@{{farcasterUsername}}):
 {{currentPost}}` +
-    messageCompletionFooter;
+    customMessageCompletionFooter;
+
 
 export const shouldRespondTemplate =
     //

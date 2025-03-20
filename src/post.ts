@@ -5,6 +5,8 @@ import {
     ModelClass,
     stringToUuid,
     elizaLogger,
+    Memory,
+    getEmbeddingZeroVector,
 } from "@elizaos/core";
 import type { FarcasterClient } from "./client";
 import { formatTimeline, postTemplate } from "./prompts";
@@ -128,14 +130,32 @@ export class FarcasterPostManager {
                 timeline
             );
 
-            const generateRoomId = stringToUuid("farcaster_generate_room");
+            const generateRoomId = this.runtime.agentId;
+            await this.runtime.ensureRoomExists(generateRoomId);
+            await this.runtime.ensureParticipantInRoom(
+                this.runtime.agentId,
+                generateRoomId
+            );
+            const existingMemories = await this.runtime.messageManager.getMemories({roomId: generateRoomId, count: 1, start: 0 })
+            let memoryToUse = existingMemories.length ? existingMemories[0] : {
+                agentId: this.runtime.agentId,
+                roomId: generateRoomId,
+                userId:  this.runtime.agentId,
+                embedding: getEmbeddingZeroVector(),
+                content: {
+                    text: "ahhhh what a great day to be alive",
+                }
+            }
+            if (!existingMemories.length) {
+                await this.runtime.messageManager.createMemory(memoryToUse)
+            }
 
             const state = await this.runtime.composeState(
                 {
                     roomId: generateRoomId,
                     userId: this.runtime.agentId,
                     agentId: this.runtime.agentId,
-                    content: { text: "", action: "" },
+                    content: memoryToUse.content,
                 },
                 {
                     farcasterUserName: profile.username,
@@ -192,7 +212,7 @@ export class FarcasterPostManager {
                 });
 
                 await this.runtime.cacheManager.set(
-                    `farcaster/${this.fid}/lastCast`,
+                    `farcaster/${this.fid}/lastPost`,
                     {
                         hash: cast.hash,
                         timestamp: Date.now(),
