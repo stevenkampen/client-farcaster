@@ -81,9 +81,6 @@ var FarcasterClient = class {
     }
   }
   async getCast(castHash) {
-    if (this.cache.has(`farcaster/cast/${castHash}`)) {
-      return this.cache.get(`farcaster/cast/${castHash}`);
-    }
     const response = await this.neynar.lookupCastByHashOrWarpcastUrl({
       identifier: castHash,
       type: "hash"
@@ -105,7 +102,6 @@ var FarcasterClient = class {
       } : {},
       timestamp: new Date(response.cast.timestamp)
     };
-    this.cache.set(`farcaster/cast/${castHash}`, cast);
     return cast;
   }
   async getCastsByFid(request) {
@@ -136,7 +132,7 @@ var FarcasterClient = class {
       type: ["mentions", "replies"]
     });
     const mentions = [];
-    neynarMentionsResponse.notifications.map((notification) => {
+    neynarMentionsResponse.notifications.filter((notification) => notification.cast).map((notification) => {
       const cast = {
         hash: notification.cast.hash,
         authorFid: notification.cast.author.fid,
