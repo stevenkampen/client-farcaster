@@ -197,6 +197,7 @@ import {
   composeContext,
   generateText,
   ModelClass,
+  stringToUuid as stringToUuid3,
   elizaLogger as elizaLogger3,
   getEmbeddingZeroVector as getEmbeddingZeroVector2
 } from "@elizaos/core";
@@ -568,6 +569,25 @@ var FarcasterPostManager = class {
   async stop() {
     if (this.timeout) clearTimeout(this.timeout);
   }
+  async upsertPostKickoffMemory(roomId) {
+    const KICKOFF_MESSAGE_ID = stringToUuid3(`${this.runtime.agentId}-post-kickoff-memory`);
+    const kickoffMemory = {
+      id: KICKOFF_MESSAGE_ID,
+      roomId,
+      userId: this.runtime.agentId,
+      agentId: this.runtime.agentId,
+      embedding: getEmbeddingZeroVector2(),
+      content: {
+        text: "ahem (*siltently* remember, you're a prolific author of posts)"
+      }
+    };
+    const existingMemory = await this.runtime.messageManager.getMemoryById(KICKOFF_MESSAGE_ID);
+    if (existingMemory) {
+      return existingMemory;
+    }
+    await this.runtime.messageManager.createMemory(kickoffMemory);
+    return kickoffMemory;
+  }
   async generateNewCast() {
     var _a;
     elizaLogger3.info("Generating new cast");
@@ -588,35 +608,20 @@ var FarcasterPostManager = class {
         this.runtime.character,
         timeline
       );
-      const generateRoomId = this.runtime.agentId;
-      await this.runtime.ensureRoomExists(generateRoomId);
+      const roomId = stringToUuid3(`${this.runtime.agentId}-farcaster-posts`);
+      await this.runtime.ensureRoomExists(roomId);
       await this.runtime.ensureParticipantInRoom(
         this.runtime.agentId,
-        generateRoomId
+        roomId
       );
-      const existingMemories = await this.runtime.messageManager.getMemories({ roomId: generateRoomId, count: 1, start: 0 });
-      let memoryToUse = existingMemories.length ? existingMemories[0] : {
-        agentId: this.runtime.agentId,
-        roomId: generateRoomId,
-        userId: this.runtime.agentId,
-        embedding: getEmbeddingZeroVector2(),
-        content: {
-          text: "ahhhh what a great day to be alive"
-        }
-      };
-      if (!existingMemories.length) {
-        await this.runtime.messageManager.createMemory(memoryToUse);
-      }
+      const kickoffMemory = await this.upsertPostKickoffMemory(roomId);
+      const recentPosts = await this.runtime.messageManager.getMemories({ roomId, count: 50, start: 0, unique: true });
       const state = await this.runtime.composeState(
-        {
-          roomId: generateRoomId,
-          userId: this.runtime.agentId,
-          agentId: this.runtime.agentId,
-          content: memoryToUse.content
-        },
+        kickoffMemory,
         {
           farcasterUserName: profile.username,
-          timeline: formattedHomeTimeline
+          timeline: formattedHomeTimeline,
+          recentPosts
         }
       );
       const context = composeContext({
@@ -648,7 +653,7 @@ var FarcasterPostManager = class {
           client: this.client,
           runtime: this.runtime,
           signerUuid: this.signerUuid,
-          roomId: generateRoomId,
+          roomId,
           content: { text: content },
           profile
         });
@@ -658,15 +663,6 @@ var FarcasterPostManager = class {
             hash: cast.hash,
             timestamp: Date.now()
           }
-        );
-        const roomId = castUuid({
-          agentId: this.runtime.agentId,
-          hash: cast.hash
-        });
-        await this.runtime.ensureRoomExists(roomId);
-        await this.runtime.ensureParticipantInRoom(
-          this.runtime.agentId,
-          roomId
         );
         elizaLogger3.info(
           `[Farcaster Neynar Client] Published cast ${cast.hash}`

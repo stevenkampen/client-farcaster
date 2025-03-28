@@ -7,6 +7,7 @@ import {
     elizaLogger,
     Memory,
     getEmbeddingZeroVector,
+    UUID,
 } from "@elizaos/core";
 import type { FarcasterClient } from "./client";
 import { formatTimeline, postTemplate } from "./prompts";
@@ -107,6 +108,26 @@ export class FarcasterPostManager {
         if (this.timeout) clearTimeout(this.timeout);
     }
 
+    private async upsertPostKickoffMemory(roomId: UUID) {
+        const KICKOFF_MESSAGE_ID = stringToUuid(`${this.runtime.agentId}-post-kickoff-memory`)
+        const kickoffMemory = {
+            id: KICKOFF_MESSAGE_ID,
+            roomId,
+            userId: this.runtime.agentId,
+            agentId: this.runtime.agentId,
+            embedding: getEmbeddingZeroVector(),
+            content: {
+                text: "ahem (*siltently* remember, you're a prolific author of posts)"
+            },
+        }
+        const existingMemory = await this.runtime.messageManager.getMemoryById(KICKOFF_MESSAGE_ID)
+        if (existingMemory) {
+            return existingMemory
+        }
+        await this.runtime.messageManager.createMemory(kickoffMemory)
+        return kickoffMemory
+    }
+
     private async generateNewCast() {
         elizaLogger.info("Generating new cast");
         try {
@@ -130,36 +151,20 @@ export class FarcasterPostManager {
                 timeline
             );
 
-            const generateRoomId = this.runtime.agentId;
-            await this.runtime.ensureRoomExists(generateRoomId);
+            const roomId = stringToUuid(`${this.runtime.agentId}-farcaster-posts`); // room is scoped to this agent on farcaster
+            await this.runtime.ensureRoomExists(roomId);
             await this.runtime.ensureParticipantInRoom(
                 this.runtime.agentId,
-                generateRoomId
+                roomId
             );
-            const existingMemories = await this.runtime.messageManager.getMemories({roomId: generateRoomId, count: 1, start: 0 })
-            let memoryToUse = existingMemories.length ? existingMemories[0] : {
-                agentId: this.runtime.agentId,
-                roomId: generateRoomId,
-                userId:  this.runtime.agentId,
-                embedding: getEmbeddingZeroVector(),
-                content: {
-                    text: "ahhhh what a great day to be alive",
-                }
-            }
-            if (!existingMemories.length) {
-                await this.runtime.messageManager.createMemory(memoryToUse)
-            }
-
+            const kickoffMemory = await this.upsertPostKickoffMemory(roomId)
+            const recentPosts = await this.runtime.messageManager.getMemoriesByRoomIds({ roomIds: [roomId], limit: 25 })
             const state = await this.runtime.composeState(
-                {
-                    roomId: generateRoomId,
-                    userId: this.runtime.agentId,
-                    agentId: this.runtime.agentId,
-                    content: memoryToUse.content,
-                },
+                kickoffMemory,
                 {
                     farcasterUserName: profile.username,
                     timeline: formattedHomeTimeline,
+                    recentPosts
                 }
             );
 
@@ -206,7 +211,7 @@ export class FarcasterPostManager {
                     client: this.client,
                     runtime: this.runtime,
                     signerUuid: this.signerUuid,
-                    roomId: generateRoomId,
+                    roomId: roomId,
                     content: { text: content },
                     profile,
                 });
@@ -217,18 +222,6 @@ export class FarcasterPostManager {
                         hash: cast.hash,
                         timestamp: Date.now(),
                     }
-                );
-
-                const roomId = castUuid({
-                    agentId: this.runtime.agentId,
-                    hash: cast.hash,
-                });
-
-                await this.runtime.ensureRoomExists(roomId);
-
-                await this.runtime.ensureParticipantInRoom(
-                    this.runtime.agentId,
-                    roomId
                 );
 
                 elizaLogger.info(
