@@ -177,6 +177,8 @@ export class FarcasterInteractionManager {
             formattedConversation,
         });
 
+        elizaLogger.debug('State during Farcaster `handleCast`:', { state, cast })
+
         const shouldRespondContext = composeContext({
             state,
             template:
@@ -185,6 +187,7 @@ export class FarcasterInteractionManager {
                 this.runtime.character?.templates?.shouldRespondTemplate ||
                 shouldRespondTemplate,
         });
+        elizaLogger.debug('Farcaster should respond context:', shouldRespondContext)
 
         const memoryId = castUuid({
             agentId: this.runtime.agentId,
@@ -229,12 +232,15 @@ export class FarcasterInteractionManager {
                 this.runtime.character?.templates?.messageHandlerTemplate ??
                 messageHandlerTemplate,
         });
+        elizaLogger.debug('Farcaster generate response context:', context)
 
         const responseContent = await generateMessageResponse({
             runtime: this.runtime,
             context,
             modelClass: ModelClass.LARGE,
         });
+
+        elizaLogger.debug('Message handler response content:', responseContent)
 
         responseContent.inReplyTo = memoryId;
 
@@ -290,7 +296,7 @@ export class FarcasterInteractionManager {
                 content: {
                     url: "",
                     hash: "0x0",
-                    text: "(You didn't actually say anything. You just thought decided which action to execute.) ",
+                    text: "(You didn't actually say anything. You just decided  action to execute.) ",
                     action: responseContent.action,
                     source: "farcaster",
                     inReplyTo: responseContent.inReplyTo

@@ -615,7 +615,7 @@ var FarcasterPostManager = class {
         roomId
       );
       const kickoffMemory = await this.upsertPostKickoffMemory(roomId);
-      const recentPosts = await this.runtime.messageManager.getMemories({ roomId, count: 50, start: 0, unique: true });
+      const recentPosts = await this.runtime.messageManager.getMemoriesByRoomIds({ roomIds: [roomId], limit: 25 });
       const state = await this.runtime.composeState(
         kickoffMemory,
         {
@@ -816,10 +816,12 @@ var FarcasterInteractionManager = class {
       currentPost,
       formattedConversation
     });
+    elizaLogger4.debug("State during Farcaster `handleCast`:", { state, cast });
     const shouldRespondContext = composeContext2({
       state,
       template: ((_a = this.runtime.character.templates) == null ? void 0 : _a.farcasterShouldRespondTemplate) || ((_c = (_b = this.runtime.character) == null ? void 0 : _b.templates) == null ? void 0 : _c.shouldRespondTemplate) || shouldRespondTemplate
     });
+    elizaLogger4.debug("Farcaster should respond context:", shouldRespondContext);
     const memoryId = castUuid({
       agentId: this.runtime.agentId,
       hash: cast.hash
@@ -850,11 +852,13 @@ var FarcasterInteractionManager = class {
       state,
       template: ((_d = this.runtime.character.templates) == null ? void 0 : _d.farcasterMessageHandlerTemplate) ?? ((_f = (_e = this.runtime.character) == null ? void 0 : _e.templates) == null ? void 0 : _f.messageHandlerTemplate) ?? messageHandlerTemplate
     });
+    elizaLogger4.debug("Farcaster generate response context:", context);
     const responseContent = await generateMessageResponse({
       runtime: this.runtime,
       context,
       modelClass: ModelClass2.LARGE
     });
+    elizaLogger4.debug("Message handler response content:", responseContent);
     responseContent.inReplyTo = memoryId;
     if (!responseContent.text && !responseContent.action) return;
     if (((_g = this.client.farcasterConfig) == null ? void 0 : _g.FARCASTER_DRY_RUN) && responseContent.text) {
@@ -900,7 +904,7 @@ var FarcasterInteractionManager = class {
         content: {
           url: "",
           hash: "0x0",
-          text: "(You didn't actually say anything. You just thought decided which action to execute.) ",
+          text: "(You didn't actually say anything. You just decided  action to execute.) ",
           action: responseContent.action,
           source: "farcaster",
           inReplyTo: responseContent.inReplyTo
